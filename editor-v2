@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Editor simple de G-code</title>
+</head>
+<body>
+  <h2>Editor básico de G-code (Mover/Escalar + Extrusión)</h2>
+  
+  <input type="file" id="fileInput" accept=".gcode"><br><br>
+  
+  <label>Escala: <input type="number" id="scale" value="1" step="0.1"></label><br>
+  <label>Desplazar X: <input type="number" id="offsetX" value="0"></label><br>
+  <label>Desplazar Y: <input type="number" id="offsetY" value="0"></label><br>
+  <label>Desplazar Z: <input type="number" id="offsetZ" value="0"></label><br><br>
+  
+  <button id="processBtn">Procesar G-code</button>
+  <button id="downloadBtn" disabled>Descargar G-code</button>
+  <br><br>
+  
+  <textarea id="output" rows="20" cols="80"></textarea>
+  
+  <script>
+    let processedText = "";
+
+    document.getElementById("processBtn").addEventListener("click", () => {
+      const fileInput = document.getElementById("fileInput");
+      const scale = parseFloat(document.getElementById("scale").value);
+      const offsetX = parseFloat(document.getElementById("offsetX").value);
+      const offsetY = parseFloat(document.getElementById("offsetY").value);
+      const offsetZ = parseFloat(document.getElementById("offsetZ").value);
+      
+      if (!fileInput.files.length) {
+        alert("Primero selecciona un archivo G-code");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const lines = e.target.result.split("\n");
+        const newLines = lines.map(line => {
+          if (line.match(/X|Y|Z|E/)) {
+            let newLine = line;
+            newLine = newLine.replace(/X([\d\.\-]+)/, (m, p1) => "X" + ((parseFloat(p1) * scale) + offsetX).toFixed(3));
+            newLine = newLine.replace(/Y([\d\.\-]+)/, (m, p1) => "Y" + ((parseFloat(p1) * scale) + offsetY).toFixed(3));
+            newLine = newLine.replace(/Z([\d\.\-]+)/, (m, p1) => "Z" + ((parseFloat(p1) * scale) + offsetZ).toFixed(3));
+            newLine = newLine.replace(/E([\d\.\-]+)/, (m, p1) => "E" + (parseFloat(p1) * scale).toFixed(5));
+            return newLine;
+          }
+          return line;
+        });
+        
+        processedText = newLines.join("\n");
+        document.getElementById("output").value = processedText;
+        document.getElementById("downloadBtn").disabled = false;
+      };
+      reader.readAsText(fileInput.files[0]);
+    });
+
+    document.getElementById("downloadBtn").addEventListener("click", () => {
+      const blob = new Blob([processedText], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "archivo_modificado.gcode"; // nombre del archivo exportado
+      link.click();
+    });
+  </script>
+</body>
+</html>
