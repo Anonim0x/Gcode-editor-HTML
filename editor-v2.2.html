@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Editor de G-code avanzado</title>
+</head>
+<body>
+  <h2>Editor de G-code (Mover/Escalar + Extrusión + Temperaturas)</h2>
+  
+  <input type="file" id="fileInput" accept=".gcode"><br><br>
+  
+  <label>Escala: <input type="number" id="scale" value="1" step="0.1"></label><br>
+  <label>Desplazar X: <input type="number" id="offsetX" value="0"></label><br>
+  <label>Desplazar Y: <input type="number" id="offsetY" value="0"></label><br>
+  <label>Desplazar Z: <input type="number" id="offsetZ" value="0"></label><br><br>
+  
+  <label>Modo de extrusión:
+    <select id="extrusionMode">
+      <option value="linear">Lineal (≈ escala)</option>
+      <option value="square">Cuadrático (≈ escala²)</option>
+      <option value="cube">Cúbico (≈ escala³)</option>
+    </select>
+  </label><br><br>
+  
+  <label>Temp Extrusor (°C): <input type="number" id="tempExtruder" value="200"></label><br>
+  <label>Temp Cama (°C): <input type="number" id="tempBed" value="60"></label><br><br>
+  
+  <button id="processBtn">Procesar G-code</button>
+  <button id="downloadBtn" disabled>Descargar G-code</button>
+  <br><br>
+  
+  <textarea id="output" rows="20" cols="80"></textarea>
+  
+  <script>
+    let processedText = "";
+
+    document.getElementById("processBtn").addEventListener("click", () => {
+      const fileInput = document.getElementById("fileInput");
+      const scale = parseFloat(document.getElementById("scale").value);
+      const offsetX = parseFloat(document.getElementById("offsetX").value);
+      const offsetY = parseFloat(document.getElementById("offsetY").value);
+      const offsetZ = parseFloat(document.getElementById("offsetZ").value);
+      const extrusionMode = document.getElementById("extrusionMode").value;
+      const tempExtruder = parseInt(document.getElementById("tempExtruder").value);
+      const tempBed = parseInt(document.getElementById("tempBed").value);
+      
+      if (!fileInput.files.length) {
+        alert("Primero selecciona un archivo G-code");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const lines = e.target.result.split("\n");
+        const newLines = lines.map(line => {
+          let newLine = line;
+          // Escalar y desplazar coordenadas
+          if (line.match(/X|Y|Z|E/)) {
+            newLine = newLine.replace(/X([\d\.\-]+)/, (m, p1) => "X" + ((parseFloat(p1) * scale) + offsetX).toFixed(3));
+            newLine = newLine.replace(/Y([\d\.\-]+)/, (m, p1) => "Y" + ((parseFloat(p1) * scale) + offsetY).toFixed(3));
+            newLine = newLine.replace(/Z([\d\.\-]+)/, (m, p1) => "Z" + ((parseFloat(p1) * scale) + offsetZ).toFixed(3));
+            
+            // Escalar extrusión según modo
+            newLine = newLine.replace(/E([\d\.\-]+)/, (m, p1) => {
+              const val = parseFloat(p1);
+              if (extrusionMode === "linear") return "E" + (val * scale).toFixed(5);
+              if (extrusionMode === "square") return "E" + (val * Math.pow(scale,2)).toFixed(5);
+              if (extrusionMode === "cube") return "E" + (val * Math.pow(scale,3)).toFixed(5);
+              return m;
+            });
+          }
+          // Cambiar temperaturas
+          if (line.match(/M104/)) newLine = `M104 S${tempExtruder}`;
+          if (line.match(/M109/)) newLine = `M109 S${tempExtruder}`;
+          if (line.match(/M140/)) newLine = `M140 S${tempBed}`;
+          if (line.match(/M190/)) newLine = `M190 S${tempBed}`;
+          
+          return newLine;
+        });
+        
+        // Insertar temperaturas al inicio si no existen
+        if (!newLines.some(l => l.includes("M104"))) newLines.unshift(`M104 S${tempExtruder}`);
+        if (!newLines.some(l => l.includes("M109"))) newLines.unshift(`M109 S${tempExtruder}`);
+        if (!newLines.some(l => l.includes("M140"))) newLines.unshift(`M140 S${tempBed}`);
+        if (!newLines.some(l => l.includes("M190"))) newLines.unshift(`M190 S${tempBed}`);
+        
+        processedText = newLines.join("\n");
+        document.getElementById("output").value = processedText;
+        document.getElementById("downloadBtn").disabled = false;
+      };
+      reader.readAsText(fileInput.files[0]);
+    });
+
+    document.getElementById("downloadBtn").addEventListener("click", () => {
+      const blob = new Blob([processedText], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "archivo_modificado.gcode";
+      link.click();
+    });
+  </script>
+</body>
+</html>
