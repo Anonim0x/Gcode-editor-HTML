@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Editor experimental de G-code con vista previa</title>
+  <style>
+    #previewCanvas {
+      border: 1px solid #333;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <h2>Editor de G-code (Experimental con vista previa 2D)</h2>
+  
+  <input type="file" id="fileInput" accept=".gcode"><br><br>
+  
+  <label>Escala: <input type="number" id="scale" value="1" step="0.1"></label><br>
+  <label>Desplazar X: <input type="number" id="offsetX" value="0"></label><br>
+  <label>Desplazar Y: <input type="number" id="offsetY" value="0"></label><br>
+  <label>Desplazar Z: <input type="number" id="offsetZ" value="0"></label><br><br>
+  
+  <label>Modo de extrusión:
+    <select id="extrusionMode">
+      <option value="linear">Lineal (≈ escala)</option>
+      <option value="square">Cuadrático (≈ escala²)</option>
+      <option value="cube">Cúbico (≈ escala³)</option>
+    </select>
+  </label><br><br>
+  
+  <label>Temp Extrusor (°C): <input type="number" id="tempExtruder" value="200"></label><br>
+  <label>Temp Cama (°C): <input type="number" id="tempBed" value="60"></label><br><br>
+  
+  <label>Duplicaciones por capa: <input type="number" id="duplications" value="2" min="1"></label><br>
+  <label>Offset Z por duplicación (mm): <input type="number" id="zStep" value="0.2" step="0.01"></label><br><br>
+  
+  <button id="processBtn">Procesar G-code</button>
+  <button id="downloadBtn" disabled>Descargar G-code</button>
+  <br><br>
+  
+  <textarea id="output" rows="15" cols="80"></textarea><br>
+  
+  <h3>Vista previa XY</h3>
+  <canvas id="previewCanvas" width="600" height="600"></canvas>
+  
+  <script>
+    let processedText = "";
+
+    document.getElementById("processBtn").addEventListener("click", () => {
+      const fileInput = document.getElementById("fileInput");
+      const scale = parseFloat(document.getElementById("scale").value);
+      const offsetX = parseFloat(document.getElementById("offsetX").value);
+      const offsetY = parseFloat(document.getElementById("offsetY").value);
+      const offsetZ = parseFloat(document.getElementById("offsetZ").value);
+      const extrusionMode = document.getElementById("extrusionMode").value;
+      const tempExtruder = parseInt(document.getElementById("tempExtruder").value);
+      const tempBed = parseInt(document.getElementById("tempBed").value);
+      const duplications = parseInt(document.getElementById("duplications").value);
+      const zStep = parseFloat(document.getElementById("zStep").value);
+      
+      if (!fileInput.files.length) {
+        alert("Primero selecciona un archivo G-code");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const lines = e.target.result.split("\n");
+        let newLines = [];
+        let bufferLayer = [];
+
+        const scaleExtrusion = (val) => {
+          if (extrusionMode === "linear") return val * scale;
+          if (extrusionMode === "square") return val * Math.pow(scale,2);
+          if (extrusionMode === "cube") return val * Math.pow(scale,3);
+          return val;
+        };
+
+        const flushLayer = () => {
+          if (bufferLayer.length > 0) {
+            newLines.push(...bufferLayer);
+            for (let i = 1; i < duplications; i++) {
+              bufferLayer.forEach(line => {
+                let dupLine = line;
+                if (line.match(/Z([\d\.\-]+)/)) {
+                  const zVal = parseFloat(line.match(/Z([\d\.\-]+)/)[1]);
+                  dupLine = dupLine.replace(/Z([\d\.\-]+)/, "Z" + (zVal + i * zStep).toFixed(3));
+                }
+                if (line.match(/E([\d\.\-]+)/)) {
+                  const eVal = parseFloat(line.match(/E([\d\.\-]+)/)[1]);
+                  dupLine = dupLine.replace(/E([\d\.\-]+)/, "E" + scaleExtrusion(eVal * (i+1)).toFixed(5));
+                }
+                newLines.push(dupLine);
+              });
+            }
+            bufferLayer = [];
+          }
+        };
+
+        lines.forEach(line => {
+          if (line.startsWith(";LAYER:")) {
+            flushLayer();
+            newLines.push(line);
+          } else {
+            let newLine = line;
+            if (line.match(/X|Y|Z|E/)) {
+              newLine = newLine.replace(/X([\d\.\-]+)/, (m, p1) => "X" + ((parseFloat(p1) * scale) + offsetX).toFixed(3));
+              newLine = newLine.replace(/Y([\d\.\-]+)/, (m, p1) => "Y" + ((parseFloat(p1) * scale) + offsetY).toFixed(3));
+              newLine = newLine.replace(/Z([\d\.\-]+)/, (m, p1) => "Z" + ((parseFloat(p1) * scale) + offsetZ).toFixed(3));
+              newLine = newLine.replace(/E([\d\.\-]+)/, (m, p1) => "E" + scaleExtrusion(parseFloat(p1)).toFixed(5));
+            }
+            if (line.match(/M104/)) newLine = `M104 S${tempExtruder}`;
+            if (line.match(/M109/)) newLine = `M109 S${tempExtruder}`;
+            if (line.match(/M140/)) newLine = `M140 S${tempBed}`;
+            if (line.match(/M190/)) newLine = `M190 S${tempBed}`;
+            
+            bufferLayer.push(newLine);
+          }
+        });
+        flushLayer();
+
+        if (!newLines.some(l => l.includes("M104"))) newLines.unshift(`M104 S${tempExtruder}`);
+        if (!newLines.some(l => l.includes("M109"))) newLines.unshift(`M109 S${tempExtruder}`);
+        if (!newLines.some(l => l.includes("M140"))) newLines.unshift(`M140 S${tempBed}`);
+        if (!newLines.some(l => l.includes("M190"))) newLines.unshift(`M190 S${tempBed}`);
+        
+        processedText = newLines.join("\n");
+        document.getElementById("output").value = processedText;
+        document.getElementById("downloadBtn").disabled = false;
+
+        // Dibujar vista previa XY
+        const canvas = document.getElementById("previewCanvas");
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.strokeStyle = "#0077cc";
+        ctx.lineWidth = 1;
+
+        let lastX = null, lastY = null;
+        newLines.forEach(line => {
+          const xMatch = line.match(/X([\d\.\-]+)/);
+          const yMatch = line.match(/Y([\d\.\-]+)/);
+          if (xMatch && yMatch) {
+            const x = parseFloat(xMatch[1]);
+            const y = parseFloat(yMatch[1]);
+            const scaleFactor = 5; // factor para que se vea en el canvas
+            const drawX = x * scaleFactor;
+            const drawY = y * scaleFactor;
+            if (lastX !== null && lastY !== null) {
+              ctx.beginPath();
+              ctx.moveTo(lastX, lastY);
+              ctx.lineTo(drawX, drawY);
+              ctx.stroke();
+            }
+            lastX = drawX;
+            lastY = drawY;
+          }
+        });
+      };
+      reader.readAsText(fileInput.files[0]);
+    });
+
+    document.getElementById("downloadBtn").addEventListener("click", () => {
+      const blob = new Blob([processedText], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "archivo_experimental.gcode";
+      link.click();
+    });
+  </script>
+</body>
+</html>
