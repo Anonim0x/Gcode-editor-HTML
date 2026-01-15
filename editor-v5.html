@@ -1,145 +1,49 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Duplicador de vueltas en espiral</title>
-  <style>
-    #previewCanvas {
-      border: 1px solid #333;
-      background: #fafafa;
+let newLines = [];
+let pathBuffer = [];
+let firstPoint = null;
+
+lines.forEach(line => {
+  const xMatch = line.match(/X([\d\.\-]+)/);
+  const yMatch = line.match(/Y([\d\.\-]+)/);
+  const zMatch = line.match(/Z([\d\.\-]+)/);
+  const eMatch = line.match(/E([\d\.\-]+)/);
+
+  // Siempre guardar la línea original
+  newLines.push(line);
+
+  if (xMatch && yMatch) {
+    const x = parseFloat(xMatch[1]);
+    const y = parseFloat(yMatch[1]);
+
+    if (!firstPoint) {
+      firstPoint = {x, y};
     }
-  </style>
-</head>
-<body>
-  <h2>Editor de G-code (Duplicar vueltas en espiral)</h2>
-  
-  <input type="file" id="fileInput" accept=".gcode"><br><br>
-  
-  <label>Offset Z por vuelta extra (mm): 
-    <input type="number" id="zStep" value="0.1" step="0.01">
-  </label><br>
-  <label>Distancia de cierre XY (mm): 
-    <input type="number" id="closeThreshold" value="0.5" step="0.1">
-  </label><br><br>
-  
-  <button id="processBtn">Procesar G-code</button>
-  <button id="downloadBtn" disabled>Descargar G-code</button>
-  <br><br>
-  
-  <textarea id="output" rows="15" cols="80"></textarea><br>
-  
-  <h3>Vista previa XY</h3>
-  <canvas id="previewCanvas" width="600" height="600"></canvas>
-  
-  <script>
-    let processedText = "";
 
-    document.getElementById("processBtn").addEventListener("click", () => {
-      const fileInput = document.getElementById("fileInput");
-      const zStep = parseFloat(document.getElementById("zStep").value);
-      const closeThreshold = parseFloat(document.getElementById("closeThreshold").value);
-      
-      if (!fileInput.files.length) {
-        alert("Primero selecciona un archivo G-code");
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const lines = e.target.result.split("\n");
-        let newLines = [];
-        let pathBuffer = [];
-        let firstPoint = null;
+    pathBuffer.push(line);
 
-        lines.forEach(line => {
-          const xMatch = line.match(/X([\d\.\-]+)/);
-          const yMatch = line.match(/Y([\d\.\-]+)/);
-          const zMatch = line.match(/Z([\d\.\-]+)/);
-          const eMatch = line.match(/E([\d\.\-]+)/);
+    const dx = x - firstPoint.x;
+    const dy = y - firstPoint.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
 
-          if (xMatch && yMatch) {
-            const x = parseFloat(xMatch[1]);
-            const y = parseFloat(yMatch[1]);
+    // Detectar cierre de vuelta
+    if (dist < 0.5 && pathBuffer.length > 50) {
+      // Duplicar la vuelta con Z desplazado
+      pathBuffer.forEach(l => {
+        let dupLine = l;
+        if (zMatch) {
+          const zVal = parseFloat(zMatch[1]);
+          dupLine = dupLine.replace(/Z([\d\.\-]+)/, "Z" + (zVal + 0.1).toFixed(3));
+        }
+        if (eMatch) {
+          const eVal = parseFloat(eMatch[1]);
+          dupLine = dupLine.replace(/E([\d\.\-]+)/, "E" + (eVal * 2).toFixed(5));
+        }
+        newLines.push(dupLine);
+      });
 
-            if (!firstPoint) {
-              firstPoint = {x, y};
-            }
-
-            pathBuffer.push(line);
-
-            const dx = x - firstPoint.x;
-            const dy = y - firstPoint.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-
-            // Detectar cierre de vuelta
-            if (dist < closeThreshold && pathBuffer.length > 50) {
-              // Copiar vuelta original
-              newLines.push(...pathBuffer);
-
-              // Generar duplicación con Z desplazado
-              pathBuffer.forEach(l => {
-                let dupLine = l;
-                if (zMatch) {
-                  const zVal = parseFloat(zMatch[1]);
-                  dupLine = dupLine.replace(/Z([\d\.\-]+)/, "Z" + (zVal + zStep).toFixed(3));
-                }
-                if (eMatch) {
-                  const eVal = parseFloat(eMatch[1]);
-                  dupLine = dupLine.replace(/E([\d\.\-]+)/, "E" + (eVal * 2).toFixed(5));
-                }
-                newLines.push(dupLine);
-              });
-
-              pathBuffer = [];
-              firstPoint = null;
-            }
-          } else {
-            newLines.push(line);
-          }
-        });
-
-        processedText = newLines.join("\n");
-        document.getElementById("output").value = processedText;
-        document.getElementById("downloadBtn").disabled = false;
-
-        // Dibujar vista previa XY
-        const canvas = document.getElementById("previewCanvas");
-        const ctx = canvas.getContext("2d");
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.strokeStyle = "#0077cc";
-        ctx.lineWidth = 1;
-
-        let lastX = null, lastY = null;
-        newLines.forEach(line => {
-          const xMatch = line.match(/X([\d\.\-]+)/);
-          const yMatch = line.match(/Y([\d\.\-]+)/);
-          if (xMatch && yMatch) {
-            const x = parseFloat(xMatch[1]);
-            const y = parseFloat(yMatch[1]);
-            const scaleFactor = 5;
-            const drawX = x * scaleFactor;
-            const drawY = y * scaleFactor;
-            if (lastX !== null && lastY !== null) {
-              ctx.beginPath();
-              ctx.moveTo(lastX, lastY);
-              ctx.lineTo(drawX, drawY);
-              ctx.stroke();
-            }
-            lastX = drawX;
-            lastY = drawY;
-          }
-        });
-      };
-      reader.readAsText(fileInput.files[0]);
-    });
-
-    document.getElementById("downloadBtn").addEventListener("click", () => {
-      const blob = new Blob([processedText], { type: "text/plain" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "archivo_vase_modificado.gcode";
-      link.click();
-    });
-  </script>
-</body>
-</html>
+      // Reiniciar para la próxima vuelta
+      pathBuffer = [];
+      firstPoint = null;
+    }
+  }
+});
